@@ -36,9 +36,7 @@ NumPy
 
 Steps
 
-Clone this repository:
-
-git clone 
+Clone this repository
 
 cd GridWorld
 
