@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gridworld Value Iteration</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: "微軟正黑體", Arial, sans-serif;
+        }
+
+        .form-container {
+            margin-bottom: 15px;
+        }
+
+        .grid-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 20px;
+        }
+
+        .grid {
+            display: grid;
+            border: 1px solid black;
+        }
+
+        .cell {
+            width: 30px;
+            height: 30px;
+            border: 1px solid black;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: white;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .obstacle { background-color: gray !important; cursor: not-allowed; }
+        .start { background-color: green !important; color: white; }
+        .end { background-color: red !important; color: white; }
+        .path { background-color: lightgreen !important; } /* 新增：最佳路徑樣式 */
+
+        .matrix-container {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .matrix {
+            display: grid;
+            grid-gap: 2px;
+            margin-top: 10px;
+        }
+
+        .matrix div {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid black;
+            font-size: 12px;
+        }
+        
+        .instruction {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            max-width: 500px;
+            text-align: center;
+        }
+        
+        .current-step {
+            font-weight: bold;
+            color: #007bff;
+            margin-top: 10px;
+        }
+
+        .best-path {
+            background-color: lightgreen !important;
+            font-weight: bold;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="form-container">
+        <label for="grid_size">輸入 n (3~10):</label>
+        <input type="number" id="grid_size" min="3" max="10" value="5">
+        <button onclick="generateGrid()">生成方格</button>
+        <button onclick="runValueIteration()">執行價值迭代</button>
+    </div>
+    
+    <div class="instruction">
+        <h3>使用說明</h3>
+        <p>1. 設定格子大小後點擊「生成方格」</p>
+        <p>2. 依次點擊格子選擇：先選<strong style="color:green">起點</strong>、再選<strong style="color:red">終點</strong>、最後選<strong style="color:gray">障礙物</strong></p>
+        <p>3. 設置完成後，點擊「執行價值迭代」計算最佳路徑</p>
+        <div class="current-step" id="current-step">請點擊一個格子選擇<strong style="color:green">起點</strong></div>
+    </div>
+
+    <div class="grid-container">
+        <div class="grid" id="grid"></div>
+    </div>
+
+    <div class="matrix-container">
+        <div class="value-matrix">
+            <h3>Value Matrix</h3>
+            <div class="matrix" id="value-matrix"></div>
+        </div>
+        <div class="policy-matrix">
+            <h3>Policy Matrix</h3>
+            <div class="matrix" id="policy-matrix"></div>
+        </div>
+    </div>
+
+    <script>
+        let n = 5;
+        let grid = [];
+        let values = [];
+        let policy = [];
+        let start = null, end = null;
+        let obstacleCount = 0;
+        let obstacles = [];
+
+        function generateGrid() {
+            n = parseInt(document.getElementById("grid_size").value);
+            grid = Array(n).fill().map(() => Array(n).fill(0));
+            values = Array(n).fill().map(() => Array(n).fill(0));
+            policy = Array(n).fill().map(() => Array(n).fill(" "));
+            start = null;
+            end = null;
+            obstacleCount = 0;
+            obstacles = [];
+            
+            let gridElement = document.getElementById("grid");
+            gridElement.innerHTML = "";
+            gridElement.style.gridTemplateColumns = `repeat(${n}, 30px)`;
+
+            for (let i = 0; i < n; i++) {
+                for (let j = 0; j < n; j++) {
+                    let cell = document.createElement("div");
+                    cell.classList.add("cell");
+                    cell.dataset.row = i;
+                    cell.dataset.col = j;
+                    cell.textContent = i * n + j + 1;
+                    cell.addEventListener("click", cellClicked);
+                    gridElement.appendChild(cell);
+                }
+            }
+            
+            // 更新指引提示
+            updateStepInstruction();
+            
+            // 清空矩陣顯示
+            document.getElementById("value-matrix").innerHTML = "";
+            document.getElementById("policy-matrix").innerHTML = "";
+        }
+        
+        function updateStepInstruction() {
+            let stepElement = document.getElementById("current-step");
+            if (!start) {
+                stepElement.innerHTML = "請點擊一個格子選擇<strong style='color:green'>起點</strong>";
+            } else if (!end) {
+                stepElement.innerHTML = "請點擊一個格子選擇<strong style='color:red'>終點</strong>";
+            } else {
+                stepElement.innerHTML = `請點擊格子選擇<strong style='color:gray'>障礙物</strong> (剩餘可選: ${n - 2 - obstacleCount})`;
+            }
+        }
+
+        function cellClicked(event) {
+            let cell = event.target;
+            let row = parseInt(cell.dataset.row);
+            let col = parseInt(cell.dataset.col);
+            
+            // 檢查是否已被選擇
+            if (cell.classList.contains("start") || 
+                cell.classList.contains("end") || 
+                cell.classList.contains("obstacle")) {
+                alert("此格子已被選擇，請選擇其他格子");
+                return;
+            }
+
+            if (!start) {
+                cell.classList.add("start");
+                start = { row, col };
+            } else if (!end) {
+                cell.classList.add("end");
+                end = { row, col };
+            } else if (obstacleCount < n - 2) {
+                cell.classList.add("obstacle");
+                grid[row][col] = -1; // 障礙物
+                obstacles.push([row, col]);
+                obstacleCount++;
+            } else {
+                alert(`最多只能有 ${n - 2} 個障礙物！`);
+                return;
+            }
+            
+            // 更新指引提示
+            updateStepInstruction();
+        }
+
+        function runValueIteration() {
+            if (!start || !end) {
+                alert("請先選擇起點和終點！");
+                return;
+            }
+            
+            // 發送請求到後端
+            $.ajax({
+                url: '/compute',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    n: n,
+                    start: [start.row, start.col],
+                    end: [end.row, end.col],
+                    obstacles: obstacles
+                }),
+                success: function(response) {
+                    // 顯示結果
+                    displayMatrix(response.value_matrix, "value-matrix");
+                    displayMatrix(response.policy_matrix, "policy-matrix");
+                    // 在 Policy Matrix 上顯示最佳路徑
+                    visualizeBestPathOnPolicyMatrix(response.policy_matrix);
+                },
+                error: function(error) {
+                    console.error("Error:", error);
+                    alert("計算過程中發生錯誤！");
+                }
+            });
+        }
+        
+        function displayMatrix(matrix, elementId) {
+            let matrixElement = document.getElementById(elementId);
+            matrixElement.innerHTML = "";
+            matrixElement.style.gridTemplateColumns = `repeat(${n}, 40px)`;
+            
+            for (let i = 0; i < n; i++) {
+                for (let j = 0; j < n; j++) {
+                    let cell = document.createElement("div");
+                    // 檢查是否為數值，如果是則保留兩位小數顯示
+                    if (typeof matrix[i][j] === 'number') {
+                        cell.textContent = matrix[i][j].toFixed(2);
+                    } else {
+                        cell.textContent = matrix[i][j];
+                    }
+                    
+                    // 特殊單元格著色
+                    if (start && i === start.row && j === start.col) {
+                        cell.style.backgroundColor = "lightgreen";
+                    } else if (end && i === end.row && j === end.col) {
+                        cell.style.backgroundColor = "lightcoral";
+                    } else if (grid[i][j] === -1) {
+                        cell.style.backgroundColor = "lightgray";
+                    }
+                    
+                    matrixElement.appendChild(cell);
+                }
+            }
+        }
+        
+        // 新增：視覺化最佳路徑
+        function visualizeBestPathOnPolicyMatrix(policyMatrix) {
+            // 清空之前的路徑標記
+            $('#policy-matrix div').removeClass('best-path');
+            
+            // 從起點開始追蹤
+            let currentRow = start.row;
+            let currentCol = start.col;
+            
+            // 記錄路徑中的所有位置
+            let pathCells = [{row: currentRow, col: currentCol}]; // 包含起點
+            
+            // 防止無限循環
+            let maxSteps = n * n;
+            let steps = 0;
+            
+            // 從起點追蹤到終點
+            while (steps < maxSteps) {
+                // 取得當前位置的最佳動作
+                let action = policyMatrix[currentRow][currentCol];
+                
+                // 如果是終點，則結束追蹤
+                if (currentRow === end.row && currentCol === end.col) {
+                    break;
+                }
+                
+                // 如果是障礙物或沒有動作，則檢查是否能繼續
+                if (!action || action === 'X' || action === 'E') {
+                    // 如果下一步是終點，繼續前進到終點
+                    if (isAdjacentToEnd(currentRow, currentCol)) {
+                        currentRow = end.row;
+                        currentCol = end.col;
+                        pathCells.push({row: currentRow, col: currentCol});
+                    }
+                    break;
+                }
+                
+                // 計算下一位置
+                let dr = 0, dc = 0;
+                if (action === '↑') dr = -1;
+                else if (action === '↓') dr = 1;
+                else if (action === '←') dc = -1;
+                else if (action === '→') dc = 1;
+                
+                // 更新當前位置
+                let nextRow = Math.max(0, Math.min(n-1, currentRow + dr));
+                let nextCol = Math.max(0, Math.min(n-1, currentCol + dc));
+                
+                // 檢查是否形成循環
+                let isLoop = pathCells.some(cell => cell.row === nextRow && cell.col === nextCol);
+                if (isLoop) {
+                    console.log("檢測到循環路徑，嘗試直接連接到終點");
+                    // 嘗試尋找其他路徑連接到終點
+                    if (isNearEnd(currentRow, currentCol)) {
+                        currentRow = end.row;
+                        currentCol = end.col;
+                        pathCells.push({row: currentRow, col: currentCol});
+                    }
+                    break;
+                }
+                
+                // 更新當前位置
+                currentRow = nextRow;
+                currentCol = nextCol;
+                
+                // 將當前位置加入路徑
+                pathCells.push({row: currentRow, col: currentCol});
+                
+                steps++;
+            }
+            
+            // 確保終點在路徑中
+            if (pathCells.length > 0 && !pathCells.some(cell => cell.row === end.row && cell.col === end.col)) {
+                console.log("終點不在路徑中，強制添加終點");
+                pathCells.push({row: end.row, col: end.col});
+            }
+            
+            // 在 Policy Matrix 上標記路徑
+            pathCells.forEach(cell => {
+                // 計算在 Policy Matrix 中的索引
+                let index = cell.row * n + cell.col;
+                $('#policy-matrix div').eq(index).addClass('best-path');
+            });
+            
+            // 調試輸出
+            console.log("路徑追蹤完成，總共 " + pathCells.length + " 個格子");
+            console.log("路徑：", pathCells);
+        }
+        
+        // 判斷是否相鄰於終點
+        function isAdjacentToEnd(row, col) {
+            return (Math.abs(row - end.row) + Math.abs(col - end.col)) === 1;
+        }
+        
+        // 判斷是否靠近終點
+        function isNearEnd(row, col) {
+            return (Math.abs(row - end.row) + Math.abs(col - end.col)) <= 2;
+        }
+
+        // 頁面載入時自動生成初始網格
+        generateGrid();
+    </script>
+</body>
+</html>
