@@ -4,6 +4,10 @@
 
 This project implements a GridWorld environment for Reinforcement Learning, utilizing Value Iteration to compute the optimal policy. The environment is deployed using Flask and provides an interactive front-end for users to define the grid, select start and end points, place obstacles, and visualize the computed optimal policy.
 
+## User Input
+
+please modify code from HW1-2 to be Value iteration and shows the best way from start point to end point.
+
 ## ✨ Features
 
 🚀 Value Iteration Algorithm to solve the GridWorld problem.
