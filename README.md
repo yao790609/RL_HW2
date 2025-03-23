@@ -99,3 +99,7 @@ Inspired by classic GridWorld reinforcement learning problems.
 
 Implemented using Flask and jQuery for interactive visualization.
 
+Demo Pictrue
+
+![image](https://github.com/yao790609/RL_HW2/blob/main/Demo.jpg)
+
